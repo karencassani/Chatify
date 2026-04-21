@@ -6,11 +6,12 @@ import pg from 'pg';
 const app = express();
 const server = createServer(app);
 
-// 1. Configuración de Socket.io (CORS y Recuperación de estado)
+// 1. Configuración de Socket.io (CON TU LINK ESPECÍFICO)
 const io = new Server(server, {
   connectionStateRecovery: {}, 
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    // IMPORTANTE: Hemos puesto tu link exacto con https://
+    origin: "https://chatify-nine-liard.vercel.app", 
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -25,13 +26,20 @@ const pool = new pg.Pool({
 });
 
 // 3. Inicialización de la Base de Datos
-// Aseguramos que la tabla exista al arrancar el servidor
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS messages (
-      id SERIAL PRIMARY KEY,
-      content TEXT
-  );
-`);
+const initDB = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+          id SERIAL PRIMARY KEY,
+          content TEXT
+      );
+    `);
+    console.log('Base de datos conectada y tabla lista');
+  } catch (err) {
+    console.error('Error al conectar con la base de datos:', err);
+  }
+};
+initDB();
 
 app.get('/', (req, res) => {
   res.send('<h1>Chatify Server Online</h1>');
@@ -42,7 +50,6 @@ io.on('connection', async (socket) => {
   console.log('Cliente conectado:', socket.id);
 
   // --- CARGA DE HISTORIAL ---
-  // Siempre que alguien se conecte, le enviamos lo que hay en Postgres
   try {
     const offset = socket.handshake.auth.serverOffset || 0;
     
@@ -60,7 +67,7 @@ io.on('connection', async (socket) => {
 
   // --- RECIBIR MENSAJES NUEVOS ---
   socket.on('chat message', async (msg) => {
-    if (!msg) return; // Evita guardar mensajes vacíos
+    if (!msg) return; 
 
     try {
       // Guardamos en Postgres
