@@ -73,8 +73,8 @@ io.on('connection', async (socket) => {
   });
 });
 
-
+// 5. UN SOLO LISTEN (Esto evita el error ERR_SERVER_ALREADY_LISTEN)
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('Servidor corriendo en el puerto ${PORT}');
+  console.log(`Servidor corriendo en el puerto ${PORT}`);
 });
