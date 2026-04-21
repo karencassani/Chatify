@@ -6,7 +6,7 @@ import pg from 'pg';
 const app = express();
 const server = createServer(app);
 
-// 1. Configuración de Socket.io (CORS y Recuperación)
+// 1. Configuración de Socket.io (CORS y Recuperación de estado)
 const io = new Server(server, {
   connectionStateRecovery: {}, 
   cors: {
@@ -16,7 +16,7 @@ const io = new Server(server, {
   }
 });
 
-// 2. Conexión a PostgreSQL con SSL (Necesario para Railway)
+// 2. Conexión a PostgreSQL con SSL (Obligatorio para Railway)
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -25,10 +25,10 @@ const pool = new pg.Pool({
 });
 
 // 3. Inicialización de la Base de Datos
+// Aseguramos que la tabla exista al arrancar el servidor
 await pool.query(`
   CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
-      client_offset TEXT UNIQUE,
       content TEXT
   );
 `);
@@ -41,30 +41,40 @@ app.get('/', (req, res) => {
 io.on('connection', async (socket) => {
   console.log('Cliente conectado:', socket.id);
 
-  if (!socket.recovered) {
-    try {
-      const result = await pool.query(
-        'SELECT id, content FROM messages WHERE id > $1 ORDER BY id',
-        [socket.handshake.auth.serverOffset || 0]
-      );
-      
-      for (const row of result.rows) {
-        socket.emit('chat message', row.content, row.id);
-      }
-    } catch (e) {
-      console.error('Error recuperando mensajes:', e);
-    }
+  // --- CARGA DE HISTORIAL ---
+  // Siempre que alguien se conecte, le enviamos lo que hay en Postgres
+  try {
+    const offset = socket.handshake.auth.serverOffset || 0;
+    
+    const result = await pool.query(
+      'SELECT id, content FROM messages WHERE id > $1 ORDER BY id ASC',
+      [offset]
+    );
+    
+    result.rows.forEach(row => {
+      socket.emit('chat message', row.content, row.id);
+    });
+  } catch (e) {
+    console.error('Error al recuperar historial:', e);
   }
-  
+
+  // --- RECIBIR MENSAJES NUEVOS ---
   socket.on('chat message', async (msg) => {
+    if (!msg) return; // Evita guardar mensajes vacíos
+
     try {
+      // Guardamos en Postgres
       const result = await pool.query(
         'INSERT INTO messages (content) VALUES ($1) RETURNING id',
         [msg]
       );
-      io.emit('chat message', msg, result.rows[0].id);
+      
+      const lastId = result.rows[0].id;
+
+      // Reenviamos a TODOS los clientes conectados
+      io.emit('chat message', msg, lastId);
     } catch (e) {
-      console.error('Error insertando mensaje:', e);
+      console.error('Error al insertar mensaje:', e);
     }
   });
 
@@ -73,8 +83,8 @@ io.on('connection', async (socket) => {
   });
 });
 
-// 5. UN SOLO LISTEN (Esto evita el error ERR_SERVER_ALREADY_LISTEN)
+// 5. Configuración del Puerto para Railway
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor corriendo en el puerto ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
 });
